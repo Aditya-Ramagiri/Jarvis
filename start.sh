@@ -135,6 +135,12 @@ if [[ "$NEED_INSTALL" == "1" ]]; then
     # failure left nothing installed at all.
     step "Installing optional features"
     FAILED=()
+    if [[ ! -f "$ROOT/requirements-optional.txt" ]]; then
+        # An older checkout, or a partial pull. The core set is already in, so
+        # warn and carry on rather than dying on a redirect error.
+        warn "requirements-optional.txt is missing - skipping optional features"
+        warn "run 'git pull' to get it"
+    else
     while IFS= read -r requirement; do
         [[ -z "$requirement" || "$requirement" == \#* ]] && continue
         name="${requirement%%[<>=;]*}"
@@ -157,6 +163,7 @@ if [[ "$NEED_INSTALL" == "1" ]]; then
             FAILED+=("$name")
         fi
     done < "$ROOT/requirements-optional.txt"
+    fi
 
     if [[ ${#FAILED[@]} -gt 0 ]]; then
         printf '\n'

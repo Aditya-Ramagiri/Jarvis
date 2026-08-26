@@ -448,68 +448,107 @@ class Orchestrator:
                 return
 
     async def _converse(self) -> None:
-        """One wake-word-initiated interaction, plus its follow-up window."""
+        """One wake-word-initiated interaction, plus its follow-up window.
+
+        Every stage logs at INFO. This path used to be completely silent until
+        transcription succeeded, which meant a stall anywhere in it was
+        indistinguishable from "Adrien ignored me" - there was no way to tell a
+        hang from a timeout from a failed recording without a debugger.
+        """
         async with self._remote_lock:
+            log.info("conversation started")
             await self._acknowledge()
 
             first = True
             while self._running:
                 self._set_state(WindowState.LISTENING if first else WindowState.FOLLOW_UP)
-                utterance = await asyncio.to_thread(
-                    record_utterance,
-                    self.mic,
-                    self.vad,
-                    silence_seconds=float(
-                        self.settings.get("conversation.endpoint_silence_seconds", 1.0)),
-                    max_seconds=float(
-                        self.settings.get("conversation.max_utterance_seconds", 30.0)),
-                    start_timeout=(
-                        6.0 if first
-                        else float(self.settings.get(
-                            "conversation.follow_up_window_seconds", 6.0))
-                    ),
+                window = (
+                    6.0 if first
+                    else float(self.settings.get("conversation.follow_up_window_seconds", 6.0))
                 )
+                log.info("listening (up to %.0fs for you to start speaking)", window)
+
+                try:
+                    utterance = await asyncio.to_thread(
+                        record_utterance,
+                        self.mic,
+                        self.vad,
+                        silence_seconds=float(
+                            self.settings.get("conversation.endpoint_silence_seconds", 1.0)),
+                        max_seconds=float(
+                            self.settings.get("conversation.max_utterance_seconds", 30.0)),
+                        start_timeout=window,
+                    )
+                except Exception:
+                    log.exception("recording failed")
+                    return
+
                 if utterance.is_empty:
                     # Spec 5.2: nothing said in the window, so stop listening.
                     # Adrien does not prompt or fill the silence.
-                    log.debug("follow-up window closed with nothing said")
+                    log.info("nothing said - back to waiting for the wake word")
                     self.conversation.close_follow_up()
                     return
 
+                log.info("recorded %.1fs of speech", utterance.duration_s)
+
                 min_seconds = float(self.settings.get("conversation.min_utterance_seconds", 0.35))
                 if utterance.duration_s < min_seconds:
-                    log.debug("ignoring %.2fs of noise", utterance.duration_s)
+                    log.info("ignoring %.2fs of noise (under the %.2fs floor)",
+                             utterance.duration_s, min_seconds)
                     if first:
                         return
                     continue
 
-                transcription = await self.transcriber.transcribe(
-                    utterance.pcm,
-                    prompt=summarise_history(self.conversation.messages),
-                )
+                log.info("transcribing...")
+                try:
+                    transcription = await self.transcriber.transcribe(
+                        utterance.pcm,
+                        prompt=summarise_history(self.conversation.messages),
+                    )
+                except Exception:
+                    log.exception("transcription failed")
+                    return
+
                 if transcription.is_empty:
-                    log.debug("nothing transcribable")
+                    log.info("transcription came back empty - nothing to act on")
                     if first:
                         return
                     continue
 
                 log.info("heard: %s", transcription.text)
-                await self.handle_text(transcription.text, speak=True, source="mac")
+                try:
+                    await self.handle_text(transcription.text, speak=True, source="mac")
+                except Exception:
+                    log.exception("the turn failed")
+                    return
+
                 self.conversation.open_follow_up()
                 first = False
 
     async def _acknowledge(self) -> None:
-        """The brief wake acknowledgement - a tone, not a phrase (spec 5.1)."""
+        """The brief wake acknowledgement - a tone, not a phrase (spec 5.1).
+
+        Time-capped. The acknowledgement is a courtesy; if the output device
+        will not cooperate the user still needs to be able to talk, so a stuck
+        speaker must never hold up the recording that follows.
+        """
         style = str(self.settings.get("wake_word.acknowledgement", "tone"))
         if style == "none":
             return
-        if style == "tone":
-            try:
-                await self.speaker.play_tone()
-            except Exception as exc:  # pragma: no cover - no output device
-                log.debug("could not play the wake tone: %s", exc)
-            return
-        await self.speak(style if len(style) < 24 else "yeah?")
+
+        try:
+            if style == "tone":
+                await asyncio.wait_for(self.speaker.play_tone(), timeout=5.0)
+            else:
+                await asyncio.wait_for(
+                    self.speak(style if len(style) < 24 else "yeah?"), timeout=15.0
+                )
+            log.debug("acknowledged")
+        except TimeoutError:
+            log.warning("the acknowledgement timed out - carrying on to listen anyway")
+        except Exception as exc:
+            log.warning("could not play the acknowledgement (%s) - listening anyway", exc)
 
     # ------------------------------------------------------------------
     # Background loops
