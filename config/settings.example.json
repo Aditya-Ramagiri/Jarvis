@@ -1,0 +1,106 @@
+{
+  "assistant": {
+    "name": "Adrien",
+    "persona": "You are Adrien, the user's personal voice assistant. You speak out loud, so keep answers short, natural and conversational - usually one or two sentences. No markdown, no bullet lists, no emoji: everything you write is read aloud. Never mention which model, API key or provider you are using. When a tool fails, say plainly what went wrong.",
+    "timezone": "local"
+  },
+
+  "wake_word": {
+    "model_path": "models/adrien.onnx",
+    "fallback_model": "hey_jarvis",
+    "threshold": 0.55,
+    "refractory_seconds": 1.5,
+    "acknowledgement": "tone"
+  },
+
+  "audio": {
+    "input_device": null,
+    "output_device": null,
+    "sample_rate": 16000,
+    "frame_ms": 30,
+    "vad_aggressiveness": 2
+  },
+
+  "conversation": {
+    "follow_up_window_seconds": 6.0,
+    "endpoint_silence_seconds": 1.0,
+    "max_utterance_seconds": 30.0,
+    "min_utterance_seconds": 0.35,
+    "history_turns": 12,
+    "barge_in_enabled": true,
+    "barge_in_speech_frames": 6
+  },
+
+  "llm": {
+    "temperature": 0.6,
+    "max_tokens": 700,
+    "max_tool_iterations": 5,
+    "force_smart_keywords": [
+      "why", "explain", "compare", "plan", "summarize", "summarise",
+      "debug", "refactor", "and then", "after that"
+    ]
+  },
+
+  "keys": {
+    "cooldown_seconds": 60.0,
+    "failure_cooldown_seconds": 15.0,
+    "max_attempts_per_call": 8,
+    "request_timeout_seconds": 25.0
+  },
+
+  "tts": {
+    "format": "mp3",
+    "latency": "balanced",
+    "stream": true
+  },
+
+  "memory": {
+    "enabled": true,
+    "top_k": 6,
+    "max_distance": 1.1,
+    "summarize_on_session_end": true
+  },
+
+  "server": {
+    "enabled": true,
+    "advertise_mdns": true,
+    "max_clients": 8
+  },
+
+  "permissions": {
+    "default": "confirm",
+    "categories": {
+      "dev": "confirm",
+      "gaming": "auto",
+      "productivity": "confirm",
+      "system": "auto",
+      "info": "auto",
+      "messaging": "confirm",
+      "extras": "auto"
+    },
+    "tools": {
+      "git_status": "auto",
+      "git_pull": "auto",
+      "check_github_notifications": "auto",
+      "check_github_prs": "auto",
+      "check_github_actions_status": "auto",
+      "explain_error_log": "auto",
+      "set_reminder": "auto",
+      "set_timer": "auto",
+      "create_note": "auto",
+      "read_notes": "auto",
+      "read_notes_": "auto",
+      "check_calendar": "auto",
+      "read_gmail": "auto",
+      "draft_email_reply": "auto",
+      "manage_todo": "auto",
+      "shutdown_mac": "confirm",
+      "restart_mac": "confirm",
+      "sleep_mac": "confirm",
+      "lock_screen": "auto",
+      "send_discord_message": "confirm",
+      "send_email": "confirm",
+      "run_script": "confirm"
+    }
+  }
+}

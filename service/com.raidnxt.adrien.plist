@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd job for Adrien (spec section 3, 10).
+
+  Installed to ~/Library/LaunchAgents, NOT /Library/LaunchDaemons: Adrien needs
+  the user's audio session, keychain and GUI session, none of which a system
+  daemon has. A LaunchAgent starts at login and runs as the user, which is
+  exactly right for a personal assistant.
+
+  __PROJECT_ROOT__ and __PYTHON__ are substituted by install_service.sh.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.raidnxt.adrien</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>-m</string>
+        <string>adrien</string>
+        <string>run</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__PROJECT_ROOT__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>__PROJECT_ROOT__</string>
+        <!-- Unbuffered, so the log file is useful while tailing it. -->
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+
+    <!-- Start at login and stay running. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <!-- Restart on a crash, but not on a clean exit: `adrien stop` should
+             stay stopped until the user asks for it back. -->
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- Do not hammer a restart loop if something is fundamentally broken. -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <!-- No dock icon: this is a background service, not an app (spec 1). -->
+    <key>LSBackgroundOnly</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__PROJECT_ROOT__/logs/adrien.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__PROJECT_ROOT__/logs/adrien.err.log</string>
+
+    <!-- Below normal priority: Adrien should never make the machine feel slow.
+         Wake-word detection is a fraction of a core, so this costs nothing. -->
+    <key>Nice</key>
+    <integer>5</integer>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>

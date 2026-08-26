@@ -1,0 +1,23 @@
+# Adrien's lint configuration.
+#
+# Scoped to rules that catch real problems rather than style opinions: F
+# (correctness), E9 (syntax), B (bugbear), UP (modern Python), I (import
+# order). Line length is 100 - these files carry a lot of explanatory comment,
+# and 88 breaks sentences mid-thought.
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = ["F", "E4", "E7", "E9", "B", "UP", "I"]
+ignore = [
+    # Zip strictness is not a real risk in this codebase.
+    "B905",
+]
+
+[lint.per-file-ignores]
+# Tests deliberately import inside functions to keep optional dependencies
+# optional, and assert on private helpers.
+"tests/*" = ["B011"]
+
+[lint.isort]
+known-first-party = ["adrien"]

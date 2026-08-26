@@ -1,0 +1,51 @@
+# --- Secrets: never commit ---
+.env
+.env.local
+*.pem
+credentials.json
+token.json
+config/google_token.json
+config/settings.json
+
+# --- Runtime data ---
+data/
+logs/
+*.db
+*.sqlite3
+chroma/
+models/*.onnx
+models/*.tflite
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+venv/
+.venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# --- Editors / OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# --- Mobile clients ---
+clients/android/.gradle/
+clients/android/build/
+clients/android/app/build/
+clients/android/local.properties
+clients/ipad/**/xcuserdata/
+clients/ipad/**/*.xcworkspace/xcshareddata/
