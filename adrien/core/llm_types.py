@@ -102,7 +102,9 @@ class Message:
 class ChatResult:
     """A completed model response plus the routing metadata we log locally."""
 
-    text: str
+    # Empty when the model replied with tool calls and no prose, which is the
+    # common case mid-chain.
+    text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     provider: str = ""
     model: str = ""

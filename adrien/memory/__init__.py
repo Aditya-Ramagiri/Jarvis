@@ -1,6 +1,17 @@
 """Long-term memory: structured facts, raw transcripts and semantic recall."""
 
-from adrien.memory.structured_store import StructuredStore
-from adrien.memory.vector_store import VectorStore
+from adrien.memory.manager import MemoryManager, Recollection
+from adrien.memory.structured_store import Fact, StructuredStore
+from adrien.memory.summarizer import Summarizer
+from adrien.memory.vector_store import MemoryRecord, VectorStore, open_vector_store
 
-__all__ = ["StructuredStore", "VectorStore"]
+__all__ = [
+    "Fact",
+    "MemoryManager",
+    "MemoryRecord",
+    "Recollection",
+    "StructuredStore",
+    "Summarizer",
+    "VectorStore",
+    "open_vector_store",
+]
