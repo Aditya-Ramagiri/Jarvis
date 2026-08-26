@@ -89,13 +89,23 @@ class WakeWordDetector:
 
     @staticmethod
     def _download_pretrained() -> None:
-        """Fetch openWakeWord's pretrained models on first run."""
+        """Fetch openWakeWord's pretrained models on first run.
+
+        Reported at WARNING rather than swallowed: if this fails the model file
+        is simply absent and the load below dies with an opaque NO_SUCHFILE,
+        which gives no clue that a download was ever attempted.
+        """
         try:
             import openwakeword
 
             openwakeword.utils.download_models()
-        except Exception as exc:  # pragma: no cover - network / already present
-            log.debug("pretrained model download skipped: %s", exc)
+        except Exception as exc:  # pragma: no cover - network dependent
+            log.warning(
+                "could not download openWakeWord's pretrained models (%s). "
+                "If the wake word fails to load, run: "
+                "python -c 'import openwakeword.utils; "
+                "openwakeword.utils.download_models()'", exc,
+            )
 
     # -- detection --------------------------------------------------------
     def process(self, frame: bytes) -> Detection | None:

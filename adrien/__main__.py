@@ -65,6 +65,16 @@ def cmd_run(args) -> int:
         asyncio.run(_run(with_server=not args.no_server))
     except KeyboardInterrupt:
         print("\nstopped")
+    except Exception as exc:
+        # A background service should not report failure as a stack trace in a
+        # log file. Say what broke and what to do about it; the traceback is
+        # still in the log at DEBUG for anyone who wants it.
+        print(f"\n{BAD} Adrien could not start: {exc}", file=sys.stderr)
+        print("  Run 'python -m adrien doctor' to see what is missing.\n", file=sys.stderr)
+        import logging
+
+        logging.getLogger("adrien").debug("startup failed", exc_info=True)
+        return 1
     return 0
 
 
@@ -156,6 +166,12 @@ def cmd_doctor(args) -> int:
             report(True, label)
         except ImportError:
             report(False, label, "pip install -r requirements.txt", fatal=fatal)
+        except Exception as exc:
+            # Installed but unusable - sounddevice raises OSError when
+            # PortAudio is missing, for instance. A diagnostic that dies on the
+            # very problem it exists to report is worse than useless, so catch
+            # everything and say what actually went wrong.
+            report(False, label, f"installed but not usable: {exc}", fatal=fatal)
 
     print("\nAudio")
     try:
@@ -165,8 +181,13 @@ def cmd_doctor(args) -> int:
         devices = sd.query_devices()
         report(True, "input", str(devices[default_in]["name"]) if default_in is not None else "?")
         report(True, "output", str(devices[default_out]["name"]) if default_out is not None else "?")
+    except ImportError:
+        report(False, "audio devices", "sounddevice is not installed")
     except Exception as exc:
-        report(False, "audio devices", str(exc))
+        hint = str(exc)
+        if "PortAudio" in hint:
+            hint = "PortAudio is missing - install it with: brew install portaudio"
+        report(False, "audio devices", hint)
 
     print("\nWake word")
     from pathlib import Path

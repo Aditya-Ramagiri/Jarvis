@@ -63,6 +63,18 @@ ALL_PROVIDERS_DOWN = "I'm having trouble connecting right now."
 SESSION_IDLE_SECONDS = 180.0
 
 
+class VoiceUnavailable(RuntimeError):
+    """The microphone or wake word engine could not be brought up.
+
+    Carries a `remedy` because this is the error a user actually hits on a
+    first run, and "what do I do about it" is the only part they need.
+    """
+
+    def __init__(self, reason: str, remedy: str) -> None:
+        super().__init__(reason)
+        self.remedy = remedy
+
+
 @dataclass
 class TurnResult:
     """Everything one turn produced - used by the WebSocket server too."""
@@ -332,20 +344,28 @@ class Orchestrator:
     # The microphone loop
     # ------------------------------------------------------------------
     async def run(self) -> None:
-        """Run until stopped. This is what the launchd service starts."""
+        """Run until stopped. This is what the launchd service starts.
+
+        The voice loop needs a working microphone; the WebSocket clients do
+        not. So a mic that will not open degrades this to serving clients only
+        rather than taking the whole service down - which matters because the
+        commonest cause is a macOS permission prompt that has not been accepted
+        yet, and "Adrien is completely dead" is a terrible way to communicate
+        "please click Allow".
+        """
         self._running = True
         log.info("Adrien starting")
 
-        self.wake.load()
-        if self.wake.using_fallback:
-            log.warning(
-                "wake word is '%s', not 'Adrien' - see docs/WAKE_WORD.md to train "
-                "the real one", self.wake.label,
-            )
-
-        self.mic = MicrophoneStream(self.audio_config).start()
         self._tasks.append(asyncio.create_task(self._reminder_loop()))
         self._tasks.append(asyncio.create_task(self._session_idle_loop()))
+
+        try:
+            self._start_listening()
+        except VoiceUnavailable as exc:
+            log.error("voice loop disabled: %s", exc)
+            log.error("%s", exc.remedy)
+            await self._serve_without_voice()
+            return
 
         try:
             while self._running:
@@ -353,6 +373,62 @@ class Orchestrator:
                 if not self._running:
                     break
                 await self._converse()
+        finally:
+            await self.shutdown()
+
+    def _start_listening(self) -> None:
+        """Load the wake word model and open the microphone.
+
+        Raises `VoiceUnavailable` with a remedy the user can act on, rather
+        than letting an ImportError or a PortAudio error surface as a traceback
+        in a launchd log nobody reads.
+        """
+        try:
+            self.wake.load()
+        except ImportError as exc:
+            raise VoiceUnavailable(
+                f"the wake word engine is not installed ({exc.name})",
+                "Install it with: pip install -r requirements.txt",
+            ) from exc
+        except Exception as exc:
+            raise VoiceUnavailable(
+                f"the wake word model would not load: {exc}",
+                "Check wake_word.model_path in config/settings.json, "
+                "or see docs/WAKE_WORD.md.",
+            ) from exc
+
+        if self.wake.using_fallback:
+            log.warning(
+                "wake word is '%s', not 'Adrien' - see docs/WAKE_WORD.md to train "
+                "the real one", self.wake.label,
+            )
+
+        try:
+            self.mic = MicrophoneStream(self.audio_config).start()
+        except ImportError as exc:
+            raise VoiceUnavailable(
+                f"the audio stack is not installed ({exc.name})",
+                "Install it with: pip install -r requirements.txt",
+            ) from exc
+        except Exception as exc:
+            raise VoiceUnavailable(
+                f"the microphone would not open: {exc}",
+                "Grant Microphone permission to the Python running Adrien in "
+                "System Settings > Privacy & Security > Microphone, then check "
+                "`python -m adrien devices`.",
+            ) from exc
+
+    async def _serve_without_voice(self) -> None:
+        """Stay up for the WebSocket clients when the mic is unavailable.
+
+        Everything except wake-word listening still works from a phone: it
+        sends its own audio, so STT, the LLM, tools and memory are all intact.
+        """
+        log.warning("running without the voice loop - clients still work fully")
+        self._set_state(WindowState.IDLE)
+        try:
+            while self._running:
+                await asyncio.sleep(1.0)
         finally:
             await self.shutdown()
 
