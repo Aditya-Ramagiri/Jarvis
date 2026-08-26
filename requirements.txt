@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# Adrien runtime dependencies (Python 3.11+)
+#
+#   pip install -r requirements.txt
+#
+# Every heavyweight dependency below is imported LAZILY by the module that
+# needs it, so the core (key rotation, tool registry, permissions, protocol)
+# stays importable — and unit-testable — on a machine that has none of the
+# audio/ML stack installed. See docs/ARCHITECTURE.md.
+# ---------------------------------------------------------------------------
+
+# --- Core ---
+python-dotenv>=1.0
+httpx>=0.27
+websockets>=12.0
+zeroconf>=0.132
+
+# --- Audio I/O, wake word, VAD ---
+numpy>=1.26,<3
+sounddevice>=0.4.6
+soundfile>=0.12
+webrtcvad-wheels>=2.0.14
+openwakeword>=0.6.0
+onnxruntime>=1.17
+
+# --- Memory (local vector store + embeddings) ---
+chromadb>=0.5
+# chromadb pulls its own embedding backend; pinned explicitly so the local
+# MiniLM model is available offline after first download.
+sentence-transformers>=3.0
+
+# --- Tools: integrations ---
+PyGithub>=2.3
+mcstatus>=11.1
+google-api-python-client>=2.130
+google-auth-oauthlib>=1.2
+google-auth-httplib2>=0.2
+
+# --- Tools: macOS UI automation (Discord, app control) ---
+pyautogui>=0.9.54; sys_platform == "darwin"
+pyobjc-framework-Quartz>=10.3; sys_platform == "darwin"
+
+# --- macOS menu bar status item ---
+rumps>=0.4.0; sys_platform == "darwin"
