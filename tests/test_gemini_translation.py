@@ -95,3 +95,49 @@ def test_openai_tools_become_function_declarations():
     }])
     assert tools[0]["functionDeclarations"][0]["name"] == "mute"
     assert tools[0]["functionDeclarations"][0]["parameters"]["type"] == "OBJECT"
+
+
+# -- thought signatures -----------------------------------------------------
+# Regression: current Gemini models attach a `thoughtSignature` to every
+# function call and reject the follow-up request with a 400 if it is not
+# handed back. Dropping it silently broke every multi-step tool chain on the
+# fallback provider - and only showed up against the live API.
+def test_a_thought_signature_is_carried_back_to_gemini():
+    call = ToolCall(
+        name="get_weather",
+        arguments={"location": "Dublin"},
+        provider_state={"thoughtSignature": "Cs0BAdHtim8abc"},
+    )
+    _, contents = to_gemini_contents([
+        Message.user("weather?"),
+        Message.assistant(tool_calls=[call]),
+        Message.tool_result(call, "18C"),
+    ])
+    model_turn = contents[1]["parts"][0]
+    assert model_turn["functionCall"]["name"] == "get_weather"
+    assert model_turn["thoughtSignature"] == "Cs0BAdHtim8abc"
+
+
+def test_a_call_without_a_signature_carries_no_empty_key():
+    """Groq-originated calls have no signature; sending an empty one is worse
+    than sending none."""
+    call = ToolCall(name="mute", arguments={})
+    _, contents = to_gemini_contents([Message.assistant(tool_calls=[call])])
+    assert "thoughtSignature" not in contents[0]["parts"][0]
+
+
+def test_signatures_are_captured_from_a_response():
+    from adrien.core.llm_types import ToolCall as TC
+
+    part = {
+        "functionCall": {"name": "set_timer", "args": {"duration": "10m"}},
+        "thoughtSignature": "sig-123",
+    }
+    # Mirrors the parsing branch in GeminiProvider.chat.
+    state = {"thoughtSignature": part["thoughtSignature"]} if part.get("thoughtSignature") else {}
+    call = TC(name=part["functionCall"]["name"],
+              arguments=part["functionCall"]["args"], provider_state=state)
+    assert call.provider_state["thoughtSignature"] == "sig-123"
+    # And it survives a round trip back into a request.
+    _, contents = to_gemini_contents([Message.assistant(tool_calls=[call])])
+    assert contents[0]["parts"][0]["thoughtSignature"] == "sig-123"

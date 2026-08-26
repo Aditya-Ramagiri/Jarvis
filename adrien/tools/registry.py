@@ -29,8 +29,9 @@ import re
 import time
 import types
 import typing
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from typing import Any
 
 from adrien.core.llm_types import ToolCall
 from adrien.logging_setup import get_logger, redact
@@ -63,11 +64,11 @@ class ToolResult:
     speak: str = ""
 
     @classmethod
-    def success(cls, data: Any = None, speak: str = "") -> "ToolResult":
+    def success(cls, data: Any = None, speak: str = "") -> ToolResult:
         return cls(ok=True, data=data, speak=speak)
 
     @classmethod
-    def failure(cls, error: str, data: Any = None) -> "ToolResult":
+    def failure(cls, error: str, data: Any = None) -> ToolResult:
         return cls(ok=False, error=error, data=data)
 
     def to_json(self, max_chars: int = 4000) -> str:
@@ -379,7 +380,7 @@ class ToolRegistry:
                 result = await asyncio.wait_for(
                     asyncio.to_thread(spec.func, **arguments), timeout=spec.timeout
                 )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning("%s timed out after %.0fs", spec.name, spec.timeout)
             return ToolResult.failure(f"{spec.name} timed out after {spec.timeout:.0f} seconds")
         except Exception as exc:

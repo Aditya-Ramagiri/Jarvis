@@ -20,10 +20,12 @@ the round trip that already failed and nothing more (4.6).
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Iterable, Sequence
+from typing import Any
 
-from adrien.config import Settings, env_key_pool, settings as global_settings
+from adrien.config import Settings, env_key_pool
+from adrien.config import settings as global_settings
 from adrien.core.keypool import KeyPool
 from adrien.core.llm_types import (
     AllProvidersFailed,
@@ -209,8 +211,26 @@ class LLMRouter:
             if slot.pool.configured and slot.pool.available_count() == 0:
                 log.warning("all %s keys are cooling down, falling through", slot.name)
 
-        log.error("every provider failed after %d attempts", len(attempts))
-        raise AllProvidersFailed(attempts, last_error)
+        # Zero attempts means no key was ever handed out, which is a different
+        # failure from "every key was tried and rejected" - and the difference
+        # is the whole diagnosis. Say which one it was.
+        reason = ""
+        if not attempts:
+            configured = [slot for slot in self.slots if slot.pool.configured]
+            if not configured:
+                reason = "no API keys are configured in .env"
+            else:
+                waits = [
+                    slot.pool.seconds_until_available() or 0.0 for slot in configured
+                ]
+                reason = (
+                    f"every key across {len(configured)} provider(s) is still cooling "
+                    f"down; the next frees up in {min(waits):.0f}s"
+                )
+
+        log.error("every provider failed after %d attempts%s",
+                  len(attempts), f" ({reason})" if reason else "")
+        raise AllProvidersFailed(attempts, last_error, reason=reason)
 
     async def complete(self, prompt: str, *, system: str = "", tier: Tier = "fast",
                        max_tokens: int = 400, temperature: float = 0.3) -> str:

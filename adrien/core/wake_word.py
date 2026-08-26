@@ -61,7 +61,7 @@ class WakeWordDetector:
         self.label = "unloaded"
 
     # -- loading ----------------------------------------------------------
-    def load(self) -> "WakeWordDetector":
+    def load(self) -> WakeWordDetector:
         from openwakeword.model import Model
 
         path = self.model_path
@@ -142,7 +142,7 @@ class WakeWordDetector:
                 pass
 
     @classmethod
-    def from_settings(cls, settings) -> "WakeWordDetector":
+    def from_settings(cls, settings) -> WakeWordDetector:
         cfg = settings.get("wake_word", {}) or {}
         return cls(
             model_path=cfg.get("model_path"),

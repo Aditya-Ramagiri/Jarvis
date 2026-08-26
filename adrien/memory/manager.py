@@ -25,7 +25,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from adrien.config import Settings, settings as global_settings
+from adrien.config import Settings
+from adrien.config import settings as global_settings
 from adrien.logging_setup import get_logger
 from adrien.memory.structured_store import Fact, StructuredStore
 from adrien.memory.summarizer import SessionDigest, Summarizer

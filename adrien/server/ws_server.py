@@ -31,7 +31,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from adrien.config import Settings, env_int, env_str, settings as global_settings
+from adrien.config import Settings, env_int, env_str
+from adrien.config import settings as global_settings
 from adrien.core.orchestrator import Orchestrator
 from adrien.logging_setup import get_logger
 from adrien.server.protocol import (
@@ -121,8 +122,10 @@ class AdrienServer:
             return  # 0.0.0.0 is every *local* interface; the router is the edge
         try:
             address = ipaddress.ip_address(self.host)
-        except ValueError:
-            raise RuntimeError(f"ADRIEN_WS_HOST={self.host!r} is not an IP address")
+        except ValueError as exc:
+            raise RuntimeError(
+                f"ADRIEN_WS_HOST={self.host!r} is not an IP address"
+            ) from exc
         if not (address.is_private or address.is_loopback or address.is_link_local):
             raise RuntimeError(
                 f"refusing to bind to the public address {self.host} - Adrien is "
@@ -324,7 +327,7 @@ class AdrienServer:
             await websocket.send(encode(MessageType.CONFIRM, prompt=prompt))
             try:
                 return await asyncio.wait_for(future, timeout=45)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 log.info("client %s never answered the confirmation", session.label)
                 return False
             finally:

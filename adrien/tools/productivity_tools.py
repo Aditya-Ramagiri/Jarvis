@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 import time
+
 from adrien.config import data_dir, env_str
 from adrien.logging_setup import get_logger
 from adrien.memory.structured_store import StructuredStore
@@ -355,7 +356,7 @@ def check_calendar(date_range: str = "today") -> ToolResult:
     if service is None:
         return ToolResult.failure(error)
 
-    now = dt.datetime.now(dt.timezone.utc).astimezone()
+    now = dt.datetime.now(dt.UTC).astimezone()
     window = (date_range or "today").strip().lower()
     if "tomorrow" in window:
         start = (now + dt.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)

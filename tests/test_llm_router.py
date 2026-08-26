@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from adrien.config import Settings, DEFAULT_SETTINGS
+from adrien.config import DEFAULT_SETTINGS, Settings
 from adrien.core.keypool import KeyPool
 from adrien.core.llm_router import LLMRouter, ProviderSlot
 from adrien.core.llm_types import AllProvidersFailed, ChatResult, Message, ProviderError
@@ -158,3 +158,39 @@ async def test_status_reports_health_without_leaking_keys():
     status = router.status()
     assert status["healthy"] is True
     assert "gsk_secret_value" not in repr(status)
+
+
+# -- diagnostics ------------------------------------------------------------
+# Regression: with every key in cooldown the router made zero attempts, and
+# the empty attempt list rendered as "no keys configured" - sending whoever is
+# debugging to look for a missing .env when the keys were fine all along.
+async def test_all_keys_cooling_is_not_reported_as_missing_keys(clock):
+    provider = ScriptedProvider("groq", [rate_limited(), rate_limited()])
+    router = build_router((provider, ["a", "b"]), clock=clock)
+
+    with pytest.raises(AllProvidersFailed):
+        await router.chat([Message.user("hi")])
+
+    # Second call: nothing is available, so no attempt is made at all.
+    with pytest.raises(AllProvidersFailed) as excinfo:
+        await router.chat([Message.user("hi again")])
+
+    message = str(excinfo.value)
+    assert "cooling down" in message
+    assert "frees up in" in message
+    assert "no API keys are configured" not in message
+
+
+async def test_genuinely_missing_keys_say_so():
+    router = LLMRouter(settings=Settings(dict(DEFAULT_SETTINGS)), slots=[])
+    with pytest.raises(AllProvidersFailed) as excinfo:
+        await router.chat([Message.user("hi")])
+    assert "no providers configured" in str(excinfo.value)
+
+
+async def test_a_pool_with_no_keys_reports_missing_configuration(clock):
+    provider = ScriptedProvider("groq", [])
+    router = build_router((provider, []), clock=clock)
+    with pytest.raises(AllProvidersFailed) as excinfo:
+        await router.chat([Message.user("hi")])
+    assert "no API keys are configured" in str(excinfo.value)

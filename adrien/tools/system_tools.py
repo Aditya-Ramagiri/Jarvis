@@ -372,7 +372,7 @@ class ClipboardHistory:
             if current is not None:
                 self.record(current)
 
-    def start(self) -> "ClipboardHistory":
+    def start(self) -> ClipboardHistory:
         if shutil.which("pbpaste") is None:
             log.info("clipboard history disabled: pbpaste not available")
             return self

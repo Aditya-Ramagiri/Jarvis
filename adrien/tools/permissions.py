@@ -25,10 +25,11 @@ a spoken yes/no on the Mac, a tap on the phone client, or an auto-yes in tests.
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Awaitable, Callable
 
-from adrien.config import Settings, settings as global_settings
+from adrien.config import Settings
+from adrien.config import settings as global_settings
 from adrien.logging_setup import get_logger
 from adrien.tools.registry import ToolResult, ToolSpec
 

@@ -18,14 +18,24 @@ Role = Literal["system", "user", "assistant", "tool"]
 
 @dataclass
 class ToolCall:
-    """A model's request to run one tool."""
+    """A model's request to run one tool.
+
+    `provider_state` carries opaque data a provider needs handed back verbatim
+    on the next turn. It exists because Gemini's current models attach a
+    `thoughtSignature` to every function call and *reject the follow-up
+    request* if it is missing - so a tool call is not fully round-trippable
+    through name and arguments alone. Keeping it as an opaque bag rather than
+    a named field means the next provider with a similar requirement needs no
+    change here.
+    """
 
     name: str
     arguments: dict[str, Any]
     id: str = field(default_factory=lambda: f"call_{uuid.uuid4().hex[:12]}")
+    provider_state: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_openai(cls, payload: dict[str, Any]) -> "ToolCall":
+    def from_openai(cls, payload: dict[str, Any]) -> ToolCall:
         function = payload.get("function") or {}
         raw = function.get("arguments") or "{}"
         if isinstance(raw, str):
@@ -82,19 +92,19 @@ class Message:
         return payload
 
     @classmethod
-    def system(cls, content: str) -> "Message":
+    def system(cls, content: str) -> Message:
         return cls(role="system", content=content)
 
     @classmethod
-    def user(cls, content: str) -> "Message":
+    def user(cls, content: str) -> Message:
         return cls(role="user", content=content)
 
     @classmethod
-    def assistant(cls, content: str = "", tool_calls: list[ToolCall] | None = None) -> "Message":
+    def assistant(cls, content: str = "", tool_calls: list[ToolCall] | None = None) -> Message:
         return cls(role="assistant", content=content, tool_calls=tool_calls or [])
 
     @classmethod
-    def tool_result(cls, call: ToolCall, content: str) -> "Message":
+    def tool_result(cls, call: ToolCall, content: str) -> Message:
         return cls(role="tool", content=content, tool_call_id=call.id, name=call.name)
 
 
@@ -149,11 +159,21 @@ class AllProvidersFailed(Exception):
     """Every key of every provider is unusable.
 
     Spec 4.5: the one case where Adrien speaks up about its own plumbing.
+
+    The message matters more than it looks. "No attempts were made" has two
+    completely different causes - nothing configured, or everything already in
+    cooldown - and conflating them sends whoever is debugging to the wrong
+    place entirely. `reason` names which one it was.
     """
 
-    def __init__(self, attempts: list[str], last_error: Exception | None = None) -> None:
-        super().__init__(
-            "all LLM providers failed: " + ("; ".join(attempts) or "no keys configured")
-        )
+    def __init__(
+        self,
+        attempts: list[str],
+        last_error: Exception | None = None,
+        reason: str = "",
+    ) -> None:
+        detail = "; ".join(attempts) or reason or "no providers were configured"
+        super().__init__(f"all LLM providers failed: {detail}")
         self.attempts = attempts
         self.last_error = last_error
+        self.reason = reason

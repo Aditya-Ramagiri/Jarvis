@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Awaitable, Callable
+from typing import Any
 
-from adrien.config import Settings, settings as global_settings
+from adrien.config import Settings
+from adrien.config import settings as global_settings
 from adrien.core.audio import (
     AudioConfig,
     BargeInMonitor,

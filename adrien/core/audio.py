@@ -29,8 +29,8 @@ import math
 import queue
 import threading
 import time
+from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass
-from typing import AsyncIterator, Callable, Iterable
 
 from adrien.logging_setup import get_logger
 
@@ -58,7 +58,7 @@ class AudioConfig:
         return self.frame_samples * SAMPLE_WIDTH
 
     @classmethod
-    def from_settings(cls, settings) -> "AudioConfig":
+    def from_settings(cls, settings) -> AudioConfig:
         audio = settings.get("audio", {}) or {}
         return cls(
             sample_rate=int(audio.get("sample_rate", SAMPLE_RATE)),
@@ -108,7 +108,7 @@ class MicrophoneStream:
         self.dropped_frames = 0
 
     # -- lifecycle --------------------------------------------------------
-    def start(self) -> "MicrophoneStream":
+    def start(self) -> MicrophoneStream:
         import sounddevice as sd
 
         def callback(indata, frames, time_info, status):  # noqa: ARG001
@@ -145,7 +145,7 @@ class MicrophoneStream:
             self._stream.close()
             self._stream = None
 
-    def __enter__(self) -> "MicrophoneStream":
+    def __enter__(self) -> MicrophoneStream:
         return self.start()
 
     def __exit__(self, *exc_info) -> None:

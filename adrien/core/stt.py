@@ -19,11 +19,11 @@ import time
 import wave
 from dataclasses import dataclass
 
-from adrien.config import Settings, env_key_pool, env_str, settings as global_settings
+from adrien.config import Settings, env_key_pool, env_str
+from adrien.config import settings as global_settings
 from adrien.core.audio import CHANNELS, SAMPLE_RATE, SAMPLE_WIDTH
 from adrien.core.http import get_client, parse_retry_after
 from adrien.core.keypool import KeyPool
-from adrien.core.llm_types import ProviderError
 from adrien.logging_setup import get_logger
 
 log = get_logger(__name__)

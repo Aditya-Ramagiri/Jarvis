@@ -22,9 +22,10 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from adrien.config import sqlite_path
 from adrien.logging_setup import get_logger, redact

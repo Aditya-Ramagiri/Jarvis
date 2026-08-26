@@ -107,7 +107,17 @@ def to_gemini_contents(messages: list[Message]) -> tuple[dict[str, Any] | None, 
             if message.content:
                 parts.append({"text": message.content})
             for call in message.tool_calls:
-                parts.append({"functionCall": {"name": call.name, "args": call.arguments}})
+                part: dict[str, Any] = {
+                    "functionCall": {"name": call.name, "args": call.arguments}
+                }
+                # Gemini rejects the follow-up request outright if the
+                # signature it issued with the call is not handed back
+                # (400: "Function call is missing a thought_signature").
+                # Dropping it breaks every multi-step chain on this provider.
+                signature = call.provider_state.get("thoughtSignature")
+                if signature:
+                    part["thoughtSignature"] = signature
+                parts.append(part)
             if parts:
                 contents.append({"role": "model", "parts": parts})
             continue
@@ -123,9 +133,16 @@ def to_gemini_contents(messages: list[Message]) -> tuple[dict[str, Any] | None, 
 class GeminiProvider:
     name = "gemini"
 
+    # Moving aliases, not pinned versions. This is the *fallback* provider:
+    # it runs only when every Groq key is down, which means it is the least
+    # exercised path in the system and the most likely to have rotted
+    # unnoticed. A pinned model that Google retires turns "Groq is rate
+    # limited" into "Adrien is broken" - which is exactly what happened with
+    # gemini-2.0-flash. An alias that tracks the current model is the safer
+    # trade here, even though it means the exact model can change underneath.
     def __init__(self, fast_model: str | None = None, smart_model: str | None = None) -> None:
-        self.fast_model = fast_model or env_str("GEMINI_FAST_MODEL", "gemini-2.0-flash")
-        self.smart_model = smart_model or env_str("GEMINI_SMART_MODEL", "gemini-2.0-flash")
+        self.fast_model = fast_model or env_str("GEMINI_FAST_MODEL", "gemini-flash-lite-latest")
+        self.smart_model = smart_model or env_str("GEMINI_SMART_MODEL", "gemini-flash-latest")
 
     def model_for(self, tier: str) -> str:
         return self.smart_model if tier == "smart" else self.fast_model
@@ -205,10 +222,15 @@ class GeminiProvider:
                 texts.append(part["text"])
             function_call = part.get("functionCall")
             if function_call and function_call.get("name"):
+                state: dict[str, Any] = {}
+                # Carried opaquely and handed straight back next turn.
+                if part.get("thoughtSignature"):
+                    state["thoughtSignature"] = part["thoughtSignature"]
                 tool_calls.append(
                     ToolCall(
                         name=function_call["name"],
                         arguments=dict(function_call.get("args") or {}),
+                        provider_state=state,
                     )
                 )
 

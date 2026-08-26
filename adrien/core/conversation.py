@@ -22,9 +22,9 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Iterable
+from enum import StrEnum
 
 from adrien.core.llm_types import Message
 from adrien.logging_setup import get_logger
@@ -32,8 +32,12 @@ from adrien.logging_setup import get_logger
 log = get_logger(__name__)
 
 
-class WindowState(str, Enum):
-    """Where the conversation is in its lifecycle."""
+class WindowState(StrEnum):
+    """Where the conversation is in its lifecycle.
+
+    A StrEnum so a state can be dropped straight into a log line or a
+    WebSocket frame without unwrapping `.value` at every call site.
+    """
 
     IDLE = "idle"                 # passive: only the wake word gets through
     LISTENING = "listening"       # actively recording a request
@@ -226,7 +230,7 @@ class Conversation:
         return time.time() - self.last_activity
 
     @classmethod
-    def from_settings(cls, settings) -> "Conversation":
+    def from_settings(cls, settings) -> Conversation:
         return cls(
             history_turns=int(settings.get("conversation.history_turns", 12)),
             follow_up_seconds=float(settings.get("conversation.follow_up_window_seconds", 6.0)),

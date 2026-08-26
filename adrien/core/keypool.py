@@ -29,8 +29,8 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Callable, Iterator
 
 from adrien.logging_setup import get_logger
 
@@ -62,7 +62,7 @@ class KeyLease:
 
     key: str
     label: str
-    pool: "KeyPool"
+    pool: KeyPool
     _state: KeyState = field(repr=False)
 
     def success(self) -> None:
@@ -99,7 +99,7 @@ class KeyPool:
         # like two independent quotas and defeat the whole mechanism.
         seen: set[str] = set()
         self._states: list[KeyState] = []
-        for index, key in enumerate(keys, start=1):
+        for key in keys:
             key = (key or "").strip()
             if not key or key in seen:
                 continue

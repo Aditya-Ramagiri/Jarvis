@@ -22,9 +22,10 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
-from adrien.config import Settings, env_key_pool, env_str, settings as global_settings
+from adrien.config import Settings, env_key_pool, env_str
+from adrien.config import settings as global_settings
 from adrien.core.http import get_client, parse_retry_after
 from adrien.core.keypool import KeyPool
 from adrien.logging_setup import get_logger
