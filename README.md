@@ -160,7 +160,7 @@ behaviour, not a missing feature.
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest              # 183 tests, no audio hardware or API keys needed
+python -m pytest              # 216 tests, no audio hardware or API keys needed
 ruff check adrien tests
 ```
 
