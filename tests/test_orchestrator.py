@@ -103,13 +103,19 @@ def build_orchestrator(tmp_path, results, registry=None, **setting_overrides):
 class FakeSpeaker:
     """Plays nothing; reports how much of the reply "came out"."""
 
-    def __init__(self, played_ratio: float = 1.0) -> None:
+    def __init__(self, played_ratio: float = 1.0, silent: bool = False) -> None:
         self.played_ratio = played_ratio
         self.chunks_played = 0
+        # Mirrors the real Speaker. Zero means nothing reached the device, and
+        # the orchestrator falls back to printing the reply.
+        self.bytes_played = 0
+        self.silent = silent
 
     async def play_stream(self, chunks, should_stop=None, **kwargs) -> float:
-        async for _ in chunks:
+        async for chunk in chunks:
             self.chunks_played += 1
+            if not self.silent:
+                self.bytes_played += len(chunk)
         return self.played_ratio
 
     async def play_tone(self, **kwargs) -> None:
@@ -405,3 +411,21 @@ async def test_status_reports_the_running_state(tmp_path):
     assert status["state"] == WindowState.IDLE.value
     assert status["providers"]["healthy"] is True
     assert "memory" in status
+
+
+# -- speaking when the voice is unavailable ---------------------------------
+async def test_a_reply_that_cannot_be_spoken_is_still_surfaced(tmp_path, capsys):
+    """Fish Audio out of credit must not swallow the answer entirely."""
+    orchestrator = build_orchestrator(tmp_path, [ChatResult(text="It's 18 degrees.")])
+    orchestrator.speaker = FakeSpeaker(silent=True)
+
+    result = await orchestrator.handle_text("what's the weather")
+
+    assert result.reply == "It's 18 degrees."
+    assert "It's 18 degrees." in capsys.readouterr().out
+
+
+async def test_a_spoken_reply_is_not_also_printed(tmp_path, capsys):
+    orchestrator = build_orchestrator(tmp_path, [ChatResult(text="All good.")])
+    await orchestrator.handle_text("status")
+    assert "text only" not in capsys.readouterr().out

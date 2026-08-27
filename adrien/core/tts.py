@@ -123,10 +123,20 @@ class TextToSpeech:
                             lease.failed()
                             continue
                         if response.status_code >= 400:
-                            body = (await response.aread())[:200]
+                            body = (await response.aread())[:300].decode("utf-8", "replace")
                             lease.success()  # key is fine, request is not
+                            if response.status_code == 402:
+                                # Out of credit. Not a bug and not retryable on
+                                # this key, but the *other* key is a separate
+                                # account and may still have balance.
+                                log.error(
+                                    "%s is out of Fish Audio credit - top up at "
+                                    "https://fish.audio/app/developers", lease.label,
+                                )
+                                lease.failed(cooldown=300)
+                                continue
                             log.error("tts rejected the request (%d): %s",
-                                      response.status_code, body.decode("utf-8", "replace"))
+                                      response.status_code, body)
                             # A bad voice id is worth one retry on the backup.
                             if voice_index + 1 < len(voices):
                                 break
@@ -152,7 +162,10 @@ class TextToSpeech:
                     lease.failed()
                     continue
 
-        log.error("every Fish Audio key failed; staying silent")
+        log.error(
+            "no Fish Audio key could speak - Adrien will reply in text only. "
+            "If this says 'out of credit', add funds at https://fish.audio/app/developers"
+        )
 
     async def synthesize(self, text: str) -> bytes:
         """Whole utterance as one PCM buffer - used by the WebSocket server,

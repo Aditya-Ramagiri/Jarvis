@@ -290,6 +290,14 @@ class Orchestrator:
             )
         except Exception as exc:
             log.error("playback failed: %s", exc)
+            self._show_unspoken(text)
+            return False
+
+        if self.speaker.bytes_played == 0:
+            # TTS produced no audio at all - no credit, no key, or a dead
+            # voice id. A voice assistant with no voice should still answer
+            # rather than silently swallowing the reply.
+            self._show_unspoken(text)
             return False
 
         interrupted = played_ratio < 0.995
@@ -303,6 +311,16 @@ class Orchestrator:
             # Adrien; keeping it would feed its own voice into the next turn.
             self.mic.flush()
         return interrupted
+
+    @staticmethod
+    def _show_unspoken(text: str) -> None:
+        """Surface a reply that could not be spoken.
+
+        Printed rather than only logged: when the voice is down this is the
+        only way the answer reaches the user at all.
+        """
+        log.warning("could not speak the reply - printing it instead")
+        print(f"\nAdrien (text only): {text}\n", flush=True)
 
     # ------------------------------------------------------------------
     # Confirmation (spoken yes/no)

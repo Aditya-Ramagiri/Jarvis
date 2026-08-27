@@ -169,7 +169,17 @@ class LLMRouter:
                 break
             for lease in slot.pool.leases(max_attempts=budget):
                 budget -= 1
-                model = slot.provider.model_for(resolved_tier)
+                # Providers that can check which models a key really has (Groq)
+                # resolve here; the rest answer from configuration.
+                resolver = getattr(slot.provider, "resolve_model", None)
+                if resolver is not None:
+                    try:
+                        model = await resolver(resolved_tier, lease.key)
+                    except Exception as exc:
+                        log.debug("model resolution failed, using the default: %s", exc)
+                        model = slot.provider.model_for(resolved_tier)
+                else:
+                    model = slot.provider.model_for(resolved_tier)
                 try:
                     result = await slot.provider.chat(
                         api_key=lease.key,

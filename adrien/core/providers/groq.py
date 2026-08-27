@@ -20,19 +20,161 @@ from adrien.logging_setup import get_logger
 log = get_logger(__name__)
 
 API_URL = "https://api.groq.com/openai/v1/chat/completions"
+MODELS_URL = "https://api.groq.com/openai/v1/models"
+
+# Preference order per tier, best first. Groq retires model ids without
+# offering a moving alias (there is no "llama-latest"), so any pinned name is a
+# future 404 - `llama-3.1-8b-instant` was the default here and stopped existing.
+# These lists are only a *preference*: the live list from /models decides what
+# is actually reachable, so a retirement costs a fallback, not an outage.
+FAST_PREFERENCES = (
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
+    "llama-3.2-3b-preview",
+    "llama-3.2-1b-preview",
+    "gemma2-9b-it",
+    "mixtral-8x7b-32768",
+)
+SMART_PREFERENCES = (
+    "llama-3.3-70b-versatile",
+    "llama-3.1-70b-versatile",
+    "llama3-70b-8192",
+    "mixtral-8x7b-32768",
+    "llama-3.1-8b-instant",
+)
+
+# Never auto-select these for chat: they are not general chat models.
+_NOT_CHAT = ("whisper", "tts", "guard", "embed", "vision", "distil")
 
 
 class GroqProvider:
+    """Groq chat, with the model id resolved against what the key can see.
+
+    Model ids are discovered rather than trusted. The first time a tier is
+    needed, `/openai/v1/models` says what this account can actually reach and
+    the best available preference wins; a 404 for a retired model refreshes
+    that list and retries once. Without this, Groq retiring a name is an
+    outage that looks like a bug in Adrien.
+    """
+
     name = "groq"
 
     def __init__(self, fast_model: str | None = None, smart_model: str | None = None) -> None:
-        self.fast_model = fast_model or env_str("GROQ_FAST_MODEL", "llama-3.1-8b-instant")
-        self.smart_model = smart_model or env_str("GROQ_SMART_MODEL", "llama-3.3-70b-versatile")
+        # An explicit setting is a deliberate choice and is tried first, but it
+        # is still verified against the live list rather than assumed.
+        self.fast_model = fast_model or env_str("GROQ_FAST_MODEL")
+        self.smart_model = smart_model or env_str("GROQ_SMART_MODEL")
+        self._available: set[str] | None = None
+        self._resolved: dict[str, str] = {}
 
     def model_for(self, tier: str) -> str:
-        return self.smart_model if tier == "smart" else self.fast_model
+        """Best known id for a tier, before any discovery has happened.
+
+        The router calls this to label the request; `chat()` does the real
+        resolution once it has a key to ask with.
+        """
+        if tier in self._resolved:
+            return self._resolved[tier]
+        configured = self.smart_model if tier == "smart" else self.fast_model
+        if configured:
+            return configured
+        preferences = SMART_PREFERENCES if tier == "smart" else FAST_PREFERENCES
+        return preferences[0]
+
+    async def _discover(self, api_key: str) -> set[str]:
+        """Ask Groq which models this key can actually use."""
+        try:
+            response = await get_client().get(
+                MODELS_URL, headers={"authorization": f"Bearer {api_key}"}, timeout=15
+            )
+            if response.status_code != 200:
+                log.warning("could not list Groq models (%d)", response.status_code)
+                return set()
+            ids = {
+                str(item.get("id"))
+                for item in (response.json() or {}).get("data") or []
+                if item.get("id")
+            }
+            log.info("Groq offers %d models to this key", len(ids))
+            return ids
+        except Exception as exc:
+            log.warning("could not list Groq models: %s", type(exc).__name__)
+            return set()
+
+    async def resolve_model(self, tier: str, api_key: str, *, refresh: bool = False) -> str:
+        """Pick a model for `tier` that this key can really reach."""
+        if not refresh and tier in self._resolved:
+            return self._resolved[tier]
+
+        if refresh or self._available is None:
+            self._available = await self._discover(api_key)
+
+        available = self._available or set()
+        configured = self.smart_model if tier == "smart" else self.fast_model
+        preferences = SMART_PREFERENCES if tier == "smart" else FAST_PREFERENCES
+
+        if not available:
+            # Discovery failed; go with what we were told and let the call
+            # report the truth rather than guessing further.
+            chosen = configured or preferences[0]
+            self._resolved[tier] = chosen
+            return chosen
+
+        if configured and configured in available:
+            chosen = configured
+        else:
+            if configured:
+                log.warning("Groq model %r is not available to this key - picking another",
+                            configured)
+            chosen = next((name for name in preferences if name in available), "")
+
+        if not chosen:
+            # Nothing from the preference list: take any plausible chat model
+            # rather than failing outright.
+            candidates = sorted(
+                name for name in available
+                if not any(marker in name.lower() for marker in _NOT_CHAT)
+            )
+            chosen = candidates[0] if candidates else (configured or preferences[0])
+            log.warning("no preferred Groq model available; falling back to %r", chosen)
+
+        log.info("Groq %s tier resolved to %s", tier, chosen)
+        self._resolved[tier] = chosen
+        return chosen
 
     async def chat(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+        temperature: float = 0.6,
+        max_tokens: int = 700,
+        timeout: float = 25.0,
+    ) -> ChatResult:
+        """One completion, retrying once if the model id turns out to be dead."""
+        try:
+            return await self._chat_once(
+                api_key=api_key, model=model, messages=messages, tools=tools,
+                temperature=temperature, max_tokens=max_tokens, timeout=timeout,
+            )
+        except ProviderError as exc:
+            if not _is_unknown_model(exc):
+                raise
+            # The id was retired. Re-read the live list and try the best model
+            # this key can actually reach, once.
+            tier = "smart" if model == self.smart_model else "fast"
+            replacement = await self.resolve_model(tier, api_key, refresh=True)
+            if replacement == model:
+                raise
+            log.warning("Groq model %r is gone; retrying with %r", model, replacement)
+            return await self._chat_once(
+                api_key=api_key, model=replacement, messages=messages, tools=tools,
+                temperature=temperature, max_tokens=max_tokens, timeout=timeout,
+            )
+
+    async def _chat_once(
         self,
         *,
         api_key: str,
@@ -146,3 +288,11 @@ def _raise_for_status(response: Any, provider: str) -> None:
         status=status,
         retryable=False,
     )
+
+
+def _is_unknown_model(error: ProviderError) -> bool:
+    """True when Groq rejected the request because the model id is retired."""
+    if error.status not in (400, 404):
+        return False
+    text = str(error).lower()
+    return "does not exist" in text or "model_not_found" in text or "decommissioned" in text

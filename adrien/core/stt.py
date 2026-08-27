@@ -107,6 +107,11 @@ class Transcriber:
             "response_format": "json",
             "temperature": "0",
         }
+        # Whisper auto-detects by default, and on a short or noisy utterance it
+        # guesses badly - a two-second English phrase came back as Russian.
+        # Pinning the language removes that entire failure mode; set
+        # stt.language to "" in settings.json to go back to auto-detection.
+        language = language or str(self.settings.get("stt.language", "en") or "")
         if language:
             data["language"] = language
         if prompt:
