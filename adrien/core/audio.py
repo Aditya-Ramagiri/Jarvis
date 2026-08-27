@@ -453,15 +453,29 @@ class Speaker:
                 )
                 self.bytes_played += len(pending)
 
-            # Let the device drain what is already queued.
-            while stream.active and not self._stop.is_set():
-                if should_stop and should_stop():
-                    break
-                await asyncio.sleep(poll_interval)
+            # Everything has been handed to the device. Draining is left to
+            # `stream.stop()` in the finally block, which blocks until the
+            # queued audio has actually played.
+            #
+            # Do NOT poll `stream.active` here. This is a *blocking* stream -
+            # it has no callback - and for those PortAudio keeps `active` True
+            # until stop() or abort() is called explicitly. It never flips on
+            # its own when the buffer empties, so polling it is an infinite
+            # loop: the wake tone passes no `should_stop` and never sets
+            # `_stop`, so `await self.speaker.play_tone()` never returned and
+            # the whole conversation stalled immediately after the wake word.
             return self._finish(total_bytes)
         finally:
             self._playing.clear()
-            stream.stop()
+            try:
+                if self._stop.is_set() or (should_stop and should_stop()):
+                    # Interrupted: drop whatever is still queued so the user
+                    # hears silence now, not the rest of the sentence.
+                    stream.abort()
+                else:
+                    stream.stop()   # blocks until the queued audio has played
+            except Exception as exc:  # pragma: no cover - device disappeared
+                log.warning("could not close the output stream cleanly: %s", exc)
             stream.close()
 
     def _finish(self, total_bytes: int) -> float:

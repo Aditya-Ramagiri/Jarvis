@@ -49,3 +49,6 @@ clients/android/app/build/
 clients/android/local.properties
 clients/ipad/**/xcuserdata/
 clients/ipad/**/*.xcworkspace/xcshareddata/
+
+# start.sh install stamp
+.venv/.deps-installed

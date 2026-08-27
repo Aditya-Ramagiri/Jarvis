@@ -1,0 +1,52 @@
+# ---------------------------------------------------------------------------
+# Adrien optional dependencies.
+#
+# `start.sh` installs these ONE AT A TIME and tolerates failures, because each
+# one costs exactly one feature when it is missing and Adrien is built to
+# degrade rather than refuse to start:
+#
+#   openwakeword       -> no wake word; clients and `adrien chat` still work
+#   webrtcvad-wheels   -> endpointing falls back to energy-only detection
+#   chromadb           -> memory falls back to keyword matching
+#   zeroconf           -> clients need a manual address instead of discovery
+#   PyGithub           -> the GitHub tools report themselves unconfigured
+#   mcstatus           -> no Minecraft server status
+#   google-*           -> no Calendar or Gmail
+#   pyautogui / pyobjc -> reduced macOS automation
+#   rumps              -> no menu bar item (the service still runs)
+#
+# openwakeword is listed with --no-deps in start.sh: it declares a
+# tflite-runtime dependency that has no wheel for Python 3.11+, and Adrien
+# only ever uses its ONNX path. Its real runtime needs (numpy, onnxruntime,
+# scipy) are covered here and in requirements.txt.
+# ---------------------------------------------------------------------------
+
+# --- Wake word and voice activity detection ---
+# openwakeword is installed with --no-deps (see above), so its real runtime
+# imports are listed here explicitly. scikit-learn is only used by its custom
+# verifier trainer, but the package imports it at module load, so it is
+# required to import openwakeword at all.
+openwakeword>=0.6.0
+scipy>=1.11
+scikit-learn>=1.3
+tqdm>=4.66
+requests>=2.31
+webrtcvad-wheels>=2.0.14
+
+# --- Memory (local vector store + embeddings) ---
+chromadb>=0.5
+
+# --- Client discovery ---
+zeroconf>=0.132
+
+# --- Tool integrations ---
+PyGithub>=2.3
+mcstatus>=11.1
+google-api-python-client>=2.130
+google-auth-oauthlib>=1.2
+google-auth-httplib2>=0.2
+
+# --- macOS only: UI automation and the menu bar status item ---
+pyautogui>=0.9.54; sys_platform == "darwin"
+pyobjc-framework-Quartz>=10.3; sys_platform == "darwin"
+rumps>=0.4.0; sys_platform == "darwin"
