@@ -9,6 +9,7 @@ client lifecycle, and both of those belong to `KeyPool` and `LLMRouter` here
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -43,8 +44,43 @@ SMART_PREFERENCES = (
     "llama-3.1-8b-instant",
 )
 
-# Never auto-select these for chat: they are not general chat models.
-_NOT_CHAT = ("whisper", "tts", "guard", "embed", "vision", "distil")
+# Never auto-select these for chat: they are not general chat models, or are
+# specialised in a way that rules out tool calling.
+_NOT_CHAT = (
+    "whisper", "tts", "embed", "guard",      # not chat models at all
+    "allam",                                  # Arabic-specialised, no tool calling
+    "distil",                                 # distilled, tool support is patchy
+)
+
+# Family ranking for the "nothing preferred survived" case. Sorting
+# alphabetically instead of by family is how a fallback once picked
+# `allam-2-7b`, which cannot do tool calling at all - the worst option in the
+# list, chosen because "a" sorts first. Lower index is better.
+_FAMILY_RANK = (
+    "llama-3.3", "llama-3.1", "llama-4", "llama-3", "llama3", "llama",
+    "qwen", "gpt-oss", "kimi", "deepseek", "gemma", "mixtral", "mistral",
+)
+
+# How many different models to try before giving up on this provider.
+_MAX_MODEL_ATTEMPTS = 3
+
+
+def rank_candidate(name: str) -> tuple[int, int, str]:
+    """Sort key for an unknown model id: known family first, then bigger.
+
+    Returns (family rank, size rank, name) so `sorted()` puts the most
+    capable recognisable chat model first.
+    """
+    lowered = name.lower()
+    family = next(
+        (index for index, marker in enumerate(_FAMILY_RANK) if marker in lowered),
+        len(_FAMILY_RANK),
+    )
+    # Prefer larger parameter counts within a family: 70b beats 8b.
+    size = 0
+    for match in re.finditer(r"(\d+)\s*b\b", lowered):
+        size = max(size, int(match.group(1)))
+    return (family, -size, name)
 
 
 class GroqProvider:
@@ -66,6 +102,9 @@ class GroqProvider:
         self.smart_model = smart_model or env_str("GROQ_SMART_MODEL")
         self._available: set[str] | None = None
         self._resolved: dict[str, str] = {}
+        # Models this key can see but that rejected tool calling. Adrien always
+        # sends tools, so one of these is useless to us however good it is.
+        self._no_tools: set[str] = set()
 
     def model_for(self, tier: str) -> str:
         """Best known id for a tier, before any discovery has happened.
@@ -120,23 +159,33 @@ class GroqProvider:
             self._resolved[tier] = chosen
             return chosen
 
-        if configured and configured in available:
+        usable = available - self._no_tools
+
+        if configured and configured in usable:
             chosen = configured
         else:
-            if configured:
+            if configured and configured in available:
+                log.warning("Groq model %r cannot do tool calling - picking another", configured)
+            elif configured:
                 log.warning("Groq model %r is not available to this key - picking another",
                             configured)
-            chosen = next((name for name in preferences if name in available), "")
+            chosen = next((name for name in preferences if name in usable), "")
 
         if not chosen:
-            # Nothing from the preference list: take any plausible chat model
-            # rather than failing outright.
+            # Nothing from the preference list survived. Rank what is left by
+            # family and size rather than alphabetically.
             candidates = sorted(
-                name for name in available
-                if not any(marker in name.lower() for marker in _NOT_CHAT)
+                (name for name in usable
+                 if not any(marker in name.lower() for marker in _NOT_CHAT)),
+                key=rank_candidate,
             )
-            chosen = candidates[0] if candidates else (configured or preferences[0])
-            log.warning("no preferred Groq model available; falling back to %r", chosen)
+            chosen = candidates[0] if candidates else ""
+            if chosen:
+                log.warning("no preferred Groq model available; using %r (best of %d)",
+                            chosen, len(candidates))
+            else:
+                chosen = configured or preferences[0]
+                log.error("no usable Groq chat model found among %d offered", len(available))
 
         log.info("Groq %s tier resolved to %s", tier, chosen)
         self._resolved[tier] = chosen
@@ -153,26 +202,45 @@ class GroqProvider:
         max_tokens: int = 700,
         timeout: float = 25.0,
     ) -> ChatResult:
-        """One completion, retrying once if the model id turns out to be dead."""
-        try:
-            return await self._chat_once(
-                api_key=api_key, model=model, messages=messages, tools=tools,
-                temperature=temperature, max_tokens=max_tokens, timeout=timeout,
-            )
-        except ProviderError as exc:
-            if not _is_unknown_model(exc):
-                raise
-            # The id was retired. Re-read the live list and try the best model
-            # this key can actually reach, once.
-            tier = "smart" if model == self.smart_model else "fast"
-            replacement = await self.resolve_model(tier, api_key, refresh=True)
-            if replacement == model:
-                raise
-            log.warning("Groq model %r is gone; retrying with %r", model, replacement)
-            return await self._chat_once(
-                api_key=api_key, model=replacement, messages=messages, tools=tools,
-                temperature=temperature, max_tokens=max_tokens, timeout=timeout,
-            )
+        """One completion, moving on if the chosen model turns out unusable.
+
+        Two failures are worth healing rather than surfacing, because both mean
+        "this id is wrong" rather than "the request is wrong":
+
+        * the model was retired (404)
+        * the model exists but cannot do tool calling (400), which is fatal for
+          Adrien since every request carries tools
+
+        Either way the model is struck off and the next best is tried.
+        """
+        tier = "smart" if model == self._resolved.get("smart") else "fast"
+        tried: list[str] = []
+
+        for _ in range(_MAX_MODEL_ATTEMPTS):
+            tried.append(model)
+            try:
+                return await self._chat_once(
+                    api_key=api_key, model=model, messages=messages, tools=tools,
+                    temperature=temperature, max_tokens=max_tokens, timeout=timeout,
+                )
+            except ProviderError as exc:
+                if _is_no_tool_support(exc):
+                    log.warning("Groq model %r cannot do tool calling; striking it off", model)
+                    self._no_tools.add(model)
+                elif _is_unknown_model(exc):
+                    log.warning("Groq model %r is gone; refreshing the list", model)
+                else:
+                    raise
+
+                replacement = await self.resolve_model(tier, api_key, refresh=True)
+                if replacement in tried:
+                    raise
+                model = replacement
+
+        raise ProviderError(
+            f"groq: no usable model found (tried {', '.join(tried)})",
+            provider=self.name, retryable=False,
+        )
 
     async def _chat_once(
         self,
@@ -288,6 +356,14 @@ def _raise_for_status(response: Any, provider: str) -> None:
         status=status,
         retryable=False,
     )
+
+
+def _is_no_tool_support(error: ProviderError) -> bool:
+    """True when the model exists but refuses tool calling."""
+    if error.status != 400:
+        return False
+    text = str(error).lower()
+    return "tool calling" in text or "does not support tools" in text
 
 
 def _is_unknown_model(error: ProviderError) -> bool:

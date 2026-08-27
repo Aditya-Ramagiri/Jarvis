@@ -64,6 +64,11 @@ def install_transport(handler, monkeypatch=None) -> list[httpx.Request]:
     return seen
 
 
+def models_response(ids: list[str]) -> httpx.Response:
+    """What GET /openai/v1/models returns."""
+    return httpx.Response(200, json={"data": [{"id": name} for name in ids]})
+
+
 def json_response(payload: dict, status: int = 200, headers: dict | None = None):
     return lambda request: httpx.Response(status, json=payload, headers=headers or {})
 
@@ -440,3 +445,88 @@ def _pool_with(keys: list[str]):
     from adrien.core.keypool import KeyPool
 
     return KeyPool("groq-stt", keys)
+
+
+# -- model selection --------------------------------------------------------
+# Regression: with every preferred model retired, the fallback sorted the
+# remaining ids alphabetically and picked `allam-2-7b` - an Arabic-specialised
+# model that cannot do tool calling at all. Every turn then died on
+# "`tool calling` is not supported with this model". Alphabetical order is not
+# a capability ranking.
+def test_ranking_prefers_capable_families_over_alphabetical():
+    from adrien.core.providers.groq import rank_candidate
+
+    offered = ["allam-2-7b", "gemma2-9b-it", "llama-3.3-70b-versatile", "qwen-2.5-32b"]
+    assert sorted(offered, key=rank_candidate)[0] == "llama-3.3-70b-versatile"
+    # The model that caused the outage must never sort first again.
+    assert sorted(offered, key=rank_candidate)[-1] == "allam-2-7b"
+
+
+def test_ranking_prefers_bigger_within_a_family():
+    from adrien.core.providers.groq import rank_candidate
+
+    offered = ["llama-3.3-8b-versatile", "llama-3.3-70b-versatile"]
+    assert sorted(offered, key=rank_candidate)[0] == "llama-3.3-70b-versatile"
+
+
+async def test_a_model_without_tool_support_is_struck_off_and_replaced():
+    from adrien.core.providers.groq import GroqProvider
+
+    provider = GroqProvider()
+    attempts: list[str] = []
+
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            return models_response(["allam-2-7b", "llama-3.3-70b-versatile"])
+        model = json.loads(request.content)["model"]
+        attempts.append(model)
+        if model == "allam-2-7b":
+            return httpx.Response(400, json={
+                "error": {"message": "`tool calling` is not supported with this model"}
+            })
+        return httpx.Response(200, json=CHAT_OK)
+
+    install_transport(handler)
+    result = await provider.chat(
+        api_key="k", model="allam-2-7b", messages=[Message.user("hi")],
+        tools=[{"type": "function", "function": {"name": "x", "description": "y",
+                                                 "parameters": {"type": "object",
+                                                                "properties": {}}}}],
+    )
+
+    assert result.text == "It's 18 degrees in Dublin."
+    assert attempts == ["allam-2-7b", "llama-3.3-70b-versatile"]
+    assert "allam-2-7b" in provider._no_tools
+
+
+async def test_a_retired_model_is_replaced():
+    from adrien.core.providers.groq import GroqProvider
+
+    provider = GroqProvider()
+    attempts: list[str] = []
+
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            return models_response(["llama-3.3-70b-versatile"])
+        model = json.loads(request.content)["model"]
+        attempts.append(model)
+        if model == "llama-3.1-8b-instant":
+            return httpx.Response(404, json={
+                "error": {"message": "The model `llama-3.1-8b-instant` does not exist"}
+            })
+        return httpx.Response(200, json=CHAT_OK)
+
+    install_transport(handler)
+    result = await provider.chat(
+        api_key="k", model="llama-3.1-8b-instant", messages=[Message.user("hi")]
+    )
+    assert result.text == "It's 18 degrees in Dublin."
+    assert attempts == ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]
+
+
+async def test_non_chat_models_are_never_selected():
+    from adrien.core.providers.groq import GroqProvider
+
+    provider = GroqProvider()
+    provider._available = {"whisper-large-v3", "llama-guard-4-12b", "llama-3.3-70b-versatile"}
+    assert await provider.resolve_model("fast", "k") == "llama-3.3-70b-versatile"
