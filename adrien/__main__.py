@@ -231,6 +231,42 @@ def cmd_doctor(args) -> int:
 # --------------------------------------------------------------------------
 # smaller commands
 # --------------------------------------------------------------------------
+def cmd_models(args) -> int:
+    """List the models each provider will actually serve this key.
+
+    Groq retires ids without warning and offers no moving alias, so "which
+    models can I really use" is a question worth being able to answer directly
+    rather than inferring from a failed turn.
+    """
+    load_env()
+
+    async def run() -> int:
+        from adrien.core.providers.groq import GroqProvider, rank_candidate
+
+        keys = env_key_pool("GROQ_API_KEY")
+        if not keys:
+            print(f"{BAD} no Groq keys in .env")
+            return 1
+
+        provider = GroqProvider()
+        available = await provider._discover(keys[0])
+        if not available:
+            print(f"{BAD} could not list Groq models")
+            return 1
+
+        print(f"\nGroq offers {len(available)} model(s) to this key:\n")
+        for name in sorted(available, key=rank_candidate):
+            print(f"  {name}")
+
+        print("\nAdrien would choose:")
+        for tier in ("fast", "smart"):
+            print(f"  {tier:6} -> {await provider.resolve_model(tier, keys[0])}")
+        print("\nPin one by setting GROQ_FAST_MODEL / GROQ_SMART_MODEL in .env.\n")
+        return 0
+
+    return asyncio.run(run())
+
+
 def cmd_status(args) -> int:
     load_env()
     from adrien.core.llm_router import LLMRouter
@@ -328,6 +364,8 @@ def main(argv: list[str] | None = None) -> int:
     subparsers.add_parser("chat", help="type instead of talking").set_defaults(func=cmd_chat)
     subparsers.add_parser("doctor", help="check the setup").set_defaults(func=cmd_doctor)
     subparsers.add_parser("status", help="provider and memory health").set_defaults(func=cmd_status)
+    subparsers.add_parser("models", help="list the models your keys can use").set_defaults(
+        func=cmd_models)
     subparsers.add_parser("devices", help="list audio devices").set_defaults(func=cmd_devices)
     subparsers.add_parser("auth-google", help="authorise Calendar and Gmail").set_defaults(
         func=cmd_auth_google)

@@ -89,6 +89,7 @@ python -m adrien run          # start the assistant
 python -m adrien chat         # type instead of talking - no mic needed
 python -m adrien doctor       # check keys, packages, devices, permissions
 python -m adrien status       # provider health and memory stats
+python -m adrien models       # which models your keys can actually use
 python -m adrien tools -v     # every registered tool and its permission mode
 python -m adrien memory       # what Adrien remembers
 python -m adrien devices      # audio devices, for pinning one in settings
@@ -160,7 +161,7 @@ behaviour, not a missing feature.
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest              # 227 tests, no audio hardware or API keys needed
+python -m pytest              # 232 tests, no audio hardware or API keys needed
 ruff check adrien tests
 ```
 
