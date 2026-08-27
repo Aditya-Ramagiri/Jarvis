@@ -180,6 +180,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "max_attempts_per_call": 8,
         "request_timeout_seconds": 25.0,
     },
+    # Whisper guesses the language badly on short utterances; pin it, or set
+    # "" to go back to auto-detection.
+    "stt": {"language": "en"},
     "tts": {"format": "mp3", "latency": "balanced", "stream": True},
     "memory": {
         "enabled": True,
